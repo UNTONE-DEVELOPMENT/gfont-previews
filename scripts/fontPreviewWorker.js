@@ -20,11 +20,17 @@ const generateHTMLPreview = (family, size, style) => {
     <head>
         <link rel="stylesheet" href="${fontCssHref}">
         <style>
+            body {
+                margin: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 100vh;
+            }
             .preview {
                 display: inline-block;
                 font-family: "${family}";
                 font-size: ${size}px;
-                padding: ${size}px;
                 white-space: nowrap;
             }
         </style>
@@ -39,23 +45,36 @@ const browser = await createBrowser();
 
 const generatePreview = async (family, style, height, output) => {
   const page = await browser.newPage();
-
   await page.setViewport({ width: height * 10, height: height * 2, deviceScaleFactor: 1 });
 
   await page.goto(`data:text/html,${generateHTMLPreview(family, height, style)}`, { waitUntil: "load" });
-  // Wait for fonts to load
+
   await page.evaluateHandle('document.fonts.ready');
 
-  const previewItemScreenshot = await page.screenshot({ type: "png", omitBackground: true, fullPage: true });
+  // Get the bounding box of the text
+  const boundingBox = await page.evaluate(() => {
+    const textElement = document.querySelector('.preview');
+    const rect = textElement.getBoundingClientRect();
+    return {
+      width: Math.ceil(rect.width),
+      height: Math.ceil(rect.height)
+    };
+  });
+
+  console.log(`Bounding Box for ${family}:`, boundingBox);
+
+  // Resize viewport based on actual text dimensions
+  await page.setViewport({ width: boundingBox.width + 20, height: boundingBox.height + 20, deviceScaleFactor: 1 });
+
+  const previewItemScreenshot = await page.screenshot({ type: "png", omitBackground: true });
 
   await page.close();
 
   const previewOutputPath = `${output}/${family}-${style}.png`;
 
   await sharp(previewItemScreenshot)
-    .trim({ lineArt: true, threshold: 3 })
-    .resize({ height: height, fit: "contain" })
-    .toFile(previewOutputPath)
+    .resize({ height: boundingBox.height, fit: "contain" }) // Ensures it doesn't upscale beyond measured height
+    .toFile(previewOutputPath);
 
   console.log(`Generated preview: ${previewOutputPath}`);
 
@@ -63,5 +82,3 @@ const generatePreview = async (family, style, height, output) => {
 };
 
 workerpool.worker({ generatePreview });
-
-
